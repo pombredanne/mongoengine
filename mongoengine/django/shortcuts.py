@@ -1,6 +1,6 @@
-from django.http import Http404
 from mongoengine.queryset import QuerySet
 from mongoengine.base import BaseDocument
+from mongoengine.errors import ValidationError
 
 def _get_queryset(cls):
     """Inspired by django.shortcuts.*"""
@@ -25,7 +25,8 @@ def get_document_or_404(cls, *args, **kwargs):
     queryset = _get_queryset(cls)
     try:
         return queryset.get(*args, **kwargs)
-    except queryset._document.DoesNotExist:
+    except (queryset._document.DoesNotExist, ValidationError):
+        from django.http import Http404
         raise Http404('No %s matches the given query.' % queryset._document._class_name)
 
 def get_list_or_404(cls, *args, **kwargs):
@@ -41,5 +42,6 @@ def get_list_or_404(cls, *args, **kwargs):
     queryset = _get_queryset(cls)
     obj_list = list(queryset.filter(*args, **kwargs))
     if not obj_list:
+        from django.http import Http404
         raise Http404('No %s matches the given query.' % queryset._document._class_name)
     return obj_list

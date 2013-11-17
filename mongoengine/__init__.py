@@ -6,19 +6,21 @@ import connection
 from connection import *
 import queryset
 from queryset import *
+import signals
+from signals import *
+from errors import *
+import errors
+import django
 
-__all__ = (document.__all__ + fields.__all__ + connection.__all__ +
-           queryset.__all__)
+__all__ = (list(document.__all__) + fields.__all__ + connection.__all__ +
+           list(queryset.__all__) + signals.__all__ + list(errors.__all__))
 
-__author__ = 'Harry Marr'
+VERSION = (0, 8, 4)
 
-VERSION = (0, 4, 0)
 
 def get_version():
-    version = '%s.%s' % (VERSION[0], VERSION[1])
-    if VERSION[2]:
-        version = '%s.%s' % (version, VERSION[2])
-    return version
+    if isinstance(VERSION[-1], basestring):
+        return '.'.join(map(str, VERSION[:-1])) + VERSION[-1]
+    return '.'.join(map(str, VERSION))
 
 __version__ = get_version()
-
