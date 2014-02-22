@@ -302,8 +302,11 @@ class BaseQuerySet(object):
         signals.pre_bulk_insert.send(self._document, documents=docs)
         try:
             ids = self._collection.insert(raw, **write_concern)
+        except pymongo.errors.DuplicateKeyError, err:
+            message = 'Could not save document (%s)';
+            raise NotUniqueError(message % unicode(err))
         except pymongo.errors.OperationFailure, err:
-            message = 'Could not save document (%s)'
+            message = 'Could not save document (%s)';
             if re.match('^E1100[01] duplicate key', unicode(err)):
                 # E11000 - duplicate key error index
                 # E11001 - duplicate key on update
@@ -331,7 +334,7 @@ class BaseQuerySet(object):
             :meth:`skip` that has been applied to this cursor into account when
             getting the count
         """
-        if self._limit == 0 and with_limit_and_skip:
+        if self._limit == 0 and with_limit_and_skip or self._none:
             return 0
         return self._cursor.count(with_limit_and_skip=with_limit_and_skip)
 
@@ -621,8 +624,15 @@ class BaseQuerySet(object):
         try:
             field = self._fields_to_dbfields([field]).pop()
         finally:
-            return self._dereference(queryset._cursor.distinct(field), 1,
-                                     name=field, instance=self._document)
+            distinct = self._dereference(queryset._cursor.distinct(field), 1,
+                                         name=field, instance=self._document)
+
+            # We may need to cast to the correct type eg. ListField(EmbeddedDocumentField)
+            doc_field = getattr(self._document._fields.get(field), "field", None)
+            instance = getattr(doc_field, "document_type", False)
+            if instance:
+                distinct = [instance(**doc) for doc in distinct]
+            return distinct
 
     def only(self, *fields):
         """Load only a subset of this document's fields. ::

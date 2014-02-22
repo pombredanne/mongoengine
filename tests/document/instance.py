@@ -409,6 +409,27 @@ class InstanceTest(unittest.TestCase):
         self.assertEqual(len(doc.embedded_field.list_field), 4)
         self.assertEqual(len(doc.embedded_field.dict_field), 2)
 
+    def test_reload_doesnt_exist(self):
+        class Foo(Document):
+            pass
+
+        f = Foo()
+        try:
+            f.reload()
+        except Foo.DoesNotExist:
+            pass
+        except Exception as ex:
+            self.assertFalse("Threw wrong exception")
+
+        f.save()
+        f.delete()
+        try:
+            f.reload()
+        except Foo.DoesNotExist:
+            pass
+        except Exception as ex:
+            self.assertFalse("Threw wrong exception")
+
     def test_dictionary_access(self):
         """Ensure that dictionary-style field access works properly.
         """
@@ -489,6 +510,26 @@ class InstanceTest(unittest.TestCase):
 
         doc = Doc.objects.get()
         self.assertEqual(doc, doc.embedded_field[0]._instance)
+
+    def test_instance_is_set_on_setattr(self):
+
+        class Email(EmbeddedDocument):
+            email = EmailField()
+            def clean(self):
+                print "instance:"
+                print self._instance
+
+        class Account(Document):
+            email = EmbeddedDocumentField(Email)
+
+        Account.drop_collection()
+        acc = Account()
+        acc.email = Email(email='test@example.com')
+        self.assertTrue(hasattr(acc._data["email"], "_instance"))
+        acc.save()
+
+        acc1 = Account.objects.first()
+        self.assertTrue(hasattr(acc1._data["email"], "_instance"))
 
     def test_document_clean(self):
         class TestDocument(Document):
@@ -2392,6 +2433,24 @@ class InstanceTest(unittest.TestCase):
         system = System.objects.first()
         self.assertEqual("UNDEFINED", system.nodes["node"].parameters["param"].macros["test"].value)
 
+    def test_embedded_document_equality(self):
+
+        class Test(Document):
+            field = StringField(required=True)
+
+        class Embedded(EmbeddedDocument):
+            ref = ReferenceField(Test)
+
+        Test.drop_collection()
+        test = Test(field='123').save()      # has id
+
+        e = Embedded(ref=test)
+        f1 = Embedded._from_son(e.to_mongo())
+        f2 = Embedded._from_son(e.to_mongo())
+
+        self.assertEqual(f1, f2)
+        f1.ref  # Dereferences lazily
+        self.assertEqual(f1, f2)
 
 if __name__ == '__main__':
     unittest.main()

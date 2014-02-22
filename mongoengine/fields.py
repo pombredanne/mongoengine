@@ -42,7 +42,8 @@ __all__ = ['StringField',  'URLField',  'EmailField',  'IntField',  'LongField',
            'GenericReferenceField',  'BinaryField',  'GridFSError',
            'GridFSProxy',  'FileField',  'ImageGridFsProxy',
            'ImproperlyConfigured',  'ImageField',  'GeoPointField', 'PointField',
-           'LineStringField', 'PolygonField', 'SequenceField',  'UUIDField']
+           'LineStringField', 'PolygonField', 'SequenceField',  'UUIDField',
+           'GeoJsonBaseField']
 
 
 RECURSIVE_REFERENCE_CONSTANT = 'self'
@@ -152,7 +153,7 @@ class EmailField(StringField):
     EMAIL_REGEX = re.compile(
         r"(^[-!#$%&'*+/=?^_`{}|~0-9A-Z]+(\.[-!#$%&'*+/=?^_`{}|~0-9A-Z]+)*"  # dot-atom
         r'|^"([\001-\010\013\014\016-\037!#-\[\]-\177]|\\[\001-011\013\014\016-\177])*"'  # quoted-string
-        r')@(?:[A-Z0-9](?:[A-Z0-9-]{0,253}[A-Z0-9])?\.)+[A-Z]{2,6}\.?$', re.IGNORECASE  # domain
+        r')@(?:[A-Z0-9](?:[A-Z0-9-]{0,253}[A-Z0-9])?\.)+[A-Z]{2,6}$', re.IGNORECASE  # domain
     )
 
     def validate(self, value):
@@ -1022,7 +1023,10 @@ class GenericReferenceField(BaseField):
         id_ = id_field.to_mongo(id_)
         collection = document._get_collection_name()
         ref = DBRef(collection, id_)
-        return {'_cls': document._class_name, '_ref': ref}
+        return SON((
+            ('_cls', document._class_name),
+            ('_ref', ref)
+        ))
 
     def prepare_query_value(self, op, value):
         if value is None:
