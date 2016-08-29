@@ -3,48 +3,50 @@ from collections import defaultdict
 import pymongo
 from bson import SON
 
+from mongoengine.base.fields import UPDATE_OPERATORS
+from mongoengine.connection import get_connection
 from mongoengine.common import _import_class
-from mongoengine.errors import InvalidQueryError, LookUpError
+from mongoengine.errors import InvalidQueryError
+from mongoengine.python_support import IS_PYMONGO_3
 
 __all__ = ('query', 'update')
 
-
 COMPARISON_OPERATORS = ('ne', 'gt', 'gte', 'lt', 'lte', 'in', 'nin', 'mod',
-                        'all', 'size', 'exists', 'not')
-GEO_OPERATORS        = ('within_distance', 'within_spherical_distance',
-                        'within_box', 'within_polygon', 'near', 'near_sphere',
-                        'max_distance', 'geo_within', 'geo_within_box',
-                        'geo_within_polygon', 'geo_within_center',
-                        'geo_within_sphere', 'geo_intersects')
-STRING_OPERATORS     = ('contains', 'icontains', 'startswith',
-                        'istartswith', 'endswith', 'iendswith',
-                        'exact', 'iexact')
-CUSTOM_OPERATORS     = ('match',)
-MATCH_OPERATORS      = (COMPARISON_OPERATORS + GEO_OPERATORS +
-                        STRING_OPERATORS + CUSTOM_OPERATORS)
-
-UPDATE_OPERATORS     = ('set', 'unset', 'inc', 'dec', 'pop', 'push',
-                        'push_all', 'pull', 'pull_all', 'add_to_set',
-                        'set_on_insert')
+                        'all', 'size', 'exists', 'not', 'elemMatch', 'type')
+GEO_OPERATORS = ('within_distance', 'within_spherical_distance',
+                 'within_box', 'within_polygon', 'near', 'near_sphere',
+                 'max_distance', 'min_distance', 'geo_within', 'geo_within_box',
+                 'geo_within_polygon', 'geo_within_center',
+                 'geo_within_sphere', 'geo_intersects')
+STRING_OPERATORS = ('contains', 'icontains', 'startswith',
+                    'istartswith', 'endswith', 'iendswith',
+                    'exact', 'iexact')
+CUSTOM_OPERATORS = ('match',)
+MATCH_OPERATORS = (COMPARISON_OPERATORS + GEO_OPERATORS +
+                   STRING_OPERATORS + CUSTOM_OPERATORS)
 
 
-def query(_doc_cls=None, _field_operation=False, **query):
+def query(_doc_cls=None, **kwargs):
     """Transform a query from Django-style format to Mongo format.
     """
     mongo_query = {}
     merge_query = defaultdict(list)
-    for key, value in sorted(query.items()):
+    for key, value in sorted(kwargs.items()):
         if key == "__raw__":
             mongo_query.update(value)
             continue
 
-        parts = key.split('__')
+        parts = key.rsplit('__')
         indices = [(i, p) for i, p in enumerate(parts) if p.isdigit()]
         parts = [part for part in parts if not part.isdigit()]
         # Check for an operator and transform to mongo-style if there is
         op = None
         if len(parts) > 1 and parts[-1] in MATCH_OPERATORS:
             op = parts.pop()
+
+        # Allw to escape operator-like field name by __
+        if len(parts) > 1 and parts[-1] == "":
+            parts.pop()
 
         negate = False
         if len(parts) > 1 and parts[-1] == 'not':
@@ -59,14 +61,20 @@ def query(_doc_cls=None, _field_operation=False, **query):
                 raise InvalidQueryError(e)
             parts = []
 
+            CachedReferenceField = _import_class('CachedReferenceField')
+
             cleaned_fields = []
             for field in fields:
                 append_field = True
                 if isinstance(field, basestring):
                     parts.append(field)
                     append_field = False
+                # is last and CachedReferenceField
+                elif isinstance(field, CachedReferenceField) and fields[-1] == field:
+                    parts.append('%s._id' % field.db_field)
                 else:
                     parts.append(field.db_field)
+
                 if append_field:
                     cleaned_fields.append(field)
 
@@ -78,13 +86,17 @@ def query(_doc_cls=None, _field_operation=False, **query):
             if op in singular_ops:
                 if isinstance(field, basestring):
                     if (op in STRING_OPERATORS and
-                       isinstance(value, basestring)):
+                            isinstance(value, basestring)):
                         StringField = _import_class('StringField')
                         value = StringField.prepare_query_value(op, value)
                     else:
                         value = field
                 else:
                     value = field.prepare_query_value(op, value)
+
+                    if isinstance(field, CachedReferenceField) and value:
+                        value = value['_id']
+
             elif op in ('in', 'nin', 'all', 'near') and not isinstance(value, dict):
                 # 'in', 'nin' and 'all' require a list of values
                 value = [field.prepare_query_value(op, v) for v in value]
@@ -93,13 +105,18 @@ def query(_doc_cls=None, _field_operation=False, **query):
         if op:
             if op in GEO_OPERATORS:
                 value = _geo_operator(field, op, value)
-            elif op in CUSTOM_OPERATORS:
-                if op == 'match':
-                    value = field.prepare_query_value(op, value)
-                    value = {"$elemMatch": value}
+            elif op in ('match', 'elemMatch'):
+                ListField = _import_class('ListField')
+                EmbeddedDocumentField = _import_class('EmbeddedDocumentField')
+                if (isinstance(value, dict) and isinstance(field, ListField) and
+                    isinstance(field.field, EmbeddedDocumentField)):
+                    value = query(field.field.document_type, **value)
                 else:
-                    NotImplementedError("Custom method '%s' has not "
-                                        "been implemented" % op)
+                    value = field.prepare_query_value(op, value)
+                value = {"$elemMatch": value}
+            elif op in CUSTOM_OPERATORS:
+                NotImplementedError("Custom method '%s' has not "
+                                    "been implemented" % op)
             elif op not in STRING_OPERATORS:
                 value = {'$' + op: value}
 
@@ -114,15 +131,34 @@ def query(_doc_cls=None, _field_operation=False, **query):
         elif key in mongo_query:
             if key in mongo_query and isinstance(mongo_query[key], dict):
                 mongo_query[key].update(value)
-                # $maxDistance needs to come last - convert to SON
-                if '$maxDistance' in mongo_query[key]:
-                    value_dict = mongo_query[key]
+                # $max/minDistance needs to come last - convert to SON
+                value_dict = mongo_query[key]
+                if ('$maxDistance' in value_dict or '$minDistance' in value_dict) and \
+                        ('$near' in value_dict or '$nearSphere' in value_dict):
                     value_son = SON()
                     for k, v in value_dict.iteritems():
-                        if k == '$maxDistance':
+                        if k == '$maxDistance' or k == '$minDistance':
                             continue
                         value_son[k] = v
-                    value_son['$maxDistance'] = value_dict['$maxDistance']
+                    # Required for MongoDB >= 2.6, may fail when combining
+                    # PyMongo 3+ and MongoDB < 2.6
+                    near_embedded = False
+                    for near_op in ('$near', '$nearSphere'):
+                        if isinstance(value_dict.get(near_op), dict) and (
+                                IS_PYMONGO_3 or get_connection().max_wire_version > 1):
+                            value_son[near_op] = SON(value_son[near_op])
+                            if '$maxDistance' in value_dict:
+                                value_son[near_op][
+                                    '$maxDistance'] = value_dict['$maxDistance']
+                            if '$minDistance' in value_dict:
+                                value_son[near_op][
+                                    '$minDistance'] = value_dict['$minDistance']
+                            near_embedded = True
+                    if not near_embedded:
+                        if '$maxDistance' in value_dict:
+                            value_son['$maxDistance'] = value_dict['$maxDistance']
+                        if '$minDistance' in value_dict:
+                            value_son['$minDistance'] = value_dict['$minDistance']
                     mongo_query[key] = value_son
             else:
                 # Store for manually merging later
@@ -135,7 +171,7 @@ def query(_doc_cls=None, _field_operation=False, **query):
         if isinstance(v, list):
             value = [{k: val} for val in v]
             if '$and' in mongo_query.keys():
-                mongo_query['$and'].append(value)
+                mongo_query['$and'].extend(value)
             else:
                 mongo_query['$and'] = value
 
@@ -151,6 +187,9 @@ def update(_doc_cls=None, **update):
             mongo_update.update(value)
             continue
         parts = key.split('__')
+        # if there is no operator, default to "set"
+        if len(parts) < 3 and parts[0] not in UPDATE_OPERATORS:
+            parts.insert(0, 'set')
         # Check for an operator and transform to mongo-style if there is
         op = None
         if parts[0] in UPDATE_OPERATORS:
@@ -248,7 +287,8 @@ def update(_doc_cls=None, **update):
             if ListField in field_classes:
                 # Join all fields via dot notation to the last ListField
                 # Then process as normal
-                last_listField = len(cleaned_fields) - field_classes.index(ListField)
+                last_listField = len(
+                    cleaned_fields) - field_classes.index(ListField)
                 key = ".".join(parts[:last_listField])
                 parts = parts[last_listField:]
                 parts.insert(0, key)
@@ -272,7 +312,11 @@ def update(_doc_cls=None, **update):
 
 def _geo_operator(field, op, value):
     """Helper to return the query for a given geo query"""
-    if field._geo_index == pymongo.GEO2D:
+    if op == "max_distance":
+        value = {'$maxDistance': value}
+    elif op == "min_distance":
+        value = {'$minDistance': value}
+    elif field._geo_index == pymongo.GEO2D:
         if op == "within_distance":
             value = {'$within': {'$center': value}}
         elif op == "within_spherical_distance":
@@ -285,8 +329,6 @@ def _geo_operator(field, op, value):
             value = {'$nearSphere': value}
         elif op == 'within_box':
             value = {'$within': {'$box': value}}
-        elif op == "max_distance":
-            value = {'$maxDistance': value}
         else:
             raise NotImplementedError("Geo method '%s' has not "
                                       "been implemented for a GeoPointField" % op)
@@ -305,8 +347,6 @@ def _geo_operator(field, op, value):
             value = {"$geoIntersects": _infer_geometry(value)}
         elif op == "near":
             value = {'$near': _infer_geometry(value)}
-        elif op == "max_distance":
-            value = {'$maxDistance': value}
         else:
             raise NotImplementedError("Geo method '%s' has not "
                                       "been implemented for a %s " % (op, field._name))
@@ -323,20 +363,25 @@ def _infer_geometry(value):
         raise InvalidQueryError("Invalid $geometry dictionary should have "
                                 "type and coordinates keys")
     elif isinstance(value, (list, set)):
+        # TODO: shouldn't we test value[0][0][0][0] to see if it is MultiPolygon?
+        # TODO: should both TypeError and IndexError be alike interpreted?
+
         try:
             value[0][0][0]
             return {"$geometry": {"type": "Polygon", "coordinates": value}}
-        except:
+        except (TypeError, IndexError):
             pass
+
         try:
             value[0][0]
             return {"$geometry": {"type": "LineString", "coordinates": value}}
-        except:
+        except (TypeError, IndexError):
             pass
+
         try:
             value[0]
             return {"$geometry": {"type": "Point", "coordinates": value}}
-        except:
+        except (TypeError, IndexError):
             pass
 
     raise InvalidQueryError("Invalid $geometry data. Can be either a dictionary "

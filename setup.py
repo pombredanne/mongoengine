@@ -10,11 +10,12 @@ except ImportError:
 
 DESCRIPTION = 'MongoEngine is a Python Object-Document ' + \
 'Mapper for working with MongoDB.'
-LONG_DESCRIPTION = None
+
 try:
-    LONG_DESCRIPTION = open('README.rst').read()
-except:
-    pass
+    with open('README.rst') as fin:
+        LONG_DESCRIPTION = fin.read()
+except Exception:
+    LONG_DESCRIPTION = None
 
 
 def get_version(version_tuple):
@@ -29,7 +30,6 @@ init = os.path.join(os.path.dirname(__file__), 'mongoengine', '__init__.py')
 version_line = list(filter(lambda l: l.startswith('VERSION'), open(init)))[0]
 
 VERSION = get_version(eval(version_line.split('=')[-1]))
-print(VERSION)
 
 CLASSIFIERS = [
     'Development Status :: 4 - Beta',
@@ -41,9 +41,11 @@ CLASSIFIERS = [
     "Programming Language :: Python :: 2.6",
     "Programming Language :: Python :: 2.7",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.1",
     "Programming Language :: Python :: 3.2",
+    "Programming Language :: Python :: 3.3",
+    "Programming Language :: Python :: 3.4",
     "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
     'Topic :: Database',
     'Topic :: Software Development :: Libraries :: Python Modules',
 ]
@@ -51,12 +53,16 @@ CLASSIFIERS = [
 extra_opts = {"packages": find_packages(exclude=["tests", "tests.*"])}
 if sys.version_info[0] == 3:
     extra_opts['use_2to3'] = True
-    extra_opts['tests_require'] = ['nose', 'coverage', 'blinker', 'jinja2==2.6', 'django>=1.5.1']
+    extra_opts['tests_require'] = ['nose', 'rednose', 'coverage==3.7.1', 'blinker', 'Pillow>=2.0.0']
     if "test" in sys.argv or "nosetests" in sys.argv:
         extra_opts['packages'] = find_packages()
         extra_opts['package_data'] = {"tests": ["fields/mongoengine.png", "fields/mongodb_leaf.png"]}
 else:
-    extra_opts['tests_require'] = ['nose', 'coverage', 'blinker', 'django>=1.4.2', 'PIL', 'jinja2>=2.6', 'python-dateutil']
+    # coverage 4 does not support Python 3.2 anymore
+    extra_opts['tests_require'] = ['nose', 'rednose', 'coverage==3.7.1', 'blinker', 'Pillow>=2.0.0', 'python-dateutil']
+
+    if sys.version_info[0] == 2 and sys.version_info[1] == 6:
+        extra_opts['tests_require'].append('unittest2')
 
 setup(name='mongoengine',
       version=VERSION,
@@ -72,7 +78,7 @@ setup(name='mongoengine',
       long_description=LONG_DESCRIPTION,
       platforms=['any'],
       classifiers=CLASSIFIERS,
-      install_requires=['pymongo>=2.5'],
+      install_requires=['pymongo>=2.7.1', 'six'],
       test_suite='nose.collector',
       **extra_opts
 )

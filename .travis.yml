@@ -1,33 +1,47 @@
-# http://travis-ci.org/#!/MongoEngine/mongoengine
 language: python
-services: mongodb
 python:
-    - "2.6"
-    - "2.7"
-    - "3.2"
-    - "3.3"
+- '2.6'
+- '2.7'
+- '3.2'
+- '3.3'
+- '3.4'
+- '3.5'
+- pypy
+- pypy3
 env:
-  - PYMONGO=dev DJANGO=1.6
-  - PYMONGO=dev DJANGO=1.5.5
-  - PYMONGO=dev DJANGO=1.4.10
-  - PYMONGO=2.5 DJANGO=1.6
-  - PYMONGO=2.5 DJANGO=1.5.5
-  - PYMONGO=2.5 DJANGO=1.4.10
-  - PYMONGO=3.2 DJANGO=1.6
-  - PYMONGO=3.2 DJANGO=1.5.5
-  - PYMONGO=3.3 DJANGO=1.6
-  - PYMONGO=3.3 DJANGO=1.5.5
+- PYMONGO=2.7
+- PYMONGO=2.8
+- PYMONGO=3.0
+- PYMONGO=dev
+matrix:
+  fast_finish: true
+before_install:
+- travis_retry sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv 7F0CEB10
+- echo 'deb http://downloads-distro.mongodb.org/repo/ubuntu-upstart dist 10gen' |
+  sudo tee /etc/apt/sources.list.d/mongodb.list
+- travis_retry sudo apt-get update
+- travis_retry sudo apt-get install mongodb-org-server
 install:
-    - if [[ $TRAVIS_PYTHON_VERSION == '2.'* ]]; then cp /usr/lib/*/libz.so $VIRTUAL_ENV/lib/; fi
-    - if [[ $TRAVIS_PYTHON_VERSION == '2.'* ]]; then pip install pil --use-mirrors ; true; fi
-    - if [[ $PYMONGO == 'dev' ]]; then pip install https://github.com/mongodb/mongo-python-driver/tarball/master; true; fi
-    - if [[ $PYMONGO != 'dev' ]]; then pip install pymongo==$PYMONGO --use-mirrors; true; fi
-    - pip install https://pypi.python.org/packages/source/p/python-dateutil/python-dateutil-2.1.tar.gz#md5=1534bb15cf311f07afaa3aacba1c028b
-    - python setup.py install
+- sudo apt-get install python-dev python3-dev libopenjpeg-dev zlib1g-dev libjpeg-turbo8-dev
+  libtiff4-dev libjpeg8-dev libfreetype6-dev liblcms2-dev libwebp-dev tcl8.5-dev tk8.5-dev
+  python-tk
+# virtualenv>=14.0.0 has dropped Python 3.2 support
+- travis_retry pip install "virtualenv<14.0.0" "tox>=1.9" coveralls
+- travis_retry tox -e $(echo py$TRAVIS_PYTHON_VERSION-mg$PYMONGO | tr -d . | sed -e 's/pypypy/pypy/') -- -e test
 script:
-    - python setup.py test
+- tox -e $(echo py$TRAVIS_PYTHON_VERSION-mg$PYMONGO | tr -d . | sed -e 's/pypypy/pypy/') -- --with-coverage
+after_script: coveralls --verbose
 notifications:
-  irc: "irc.freenode.org#mongoengine"
+  irc: irc.freenode.org#mongoengine
 branches:
   only:
-    - master
+  - master
+  - /^v.*$/
+deploy:
+  provider: pypi
+  user: the_drow
+  password:
+    secure: QMyatmWBnC6ZN3XLW2+fTBDU4LQcp1m/LjR2/0uamyeUzWKdlOoh/Wx5elOgLwt/8N9ppdPeG83ose1jOz69l5G0MUMjv8n/RIcMFSpCT59tGYqn3kh55b0cIZXFT9ar+5cxlif6a5rS72IHm5li7QQyxexJIII6Uxp0kpvUmek=
+  on:
+    tags: true
+    repo: MongoEngine/mongoengine

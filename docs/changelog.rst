@@ -2,9 +2,169 @@
 Changelog
 =========
 
+Changes in 0.10.7 - DEV
+=======================
+- Fixed the bug where dynamic doc has index inside a dict field #1278
+- Fixed not being able to specify `use_db_field=False` on `ListField(EmbeddedDocumentField)` instances
+- Fixed cascade delete mixing among collections #1224
+- Add `signal_kwargs` argument to `Document.save`, `Document.delete` and `BaseQuerySet.insert` to be passed to signals calls #1206
+- Raise `OperationError` when trying to do a `drop_collection` on document with no collection set.
+- count on ListField of EmbeddedDocumentField fails. #1187
+- Fixed long fields stored as int32 in Python 3. #1253
+- MapField now handles unicodes keys correctly. #1267
+- ListField now handles negative indicies correctly. #1270
+- Fixed AttributeError when initializing EmbeddedDocument with positional args. #681
+- Fixed no_cursor_timeout error with pymongo 3.0+ #1304
+- Replaced map-reduce based QuerySet.sum/average with aggregation-based implementations #1336
+
+Changes in 0.10.6
+=================
+- Add support for mocking MongoEngine based on mongomock. #1151
+- Fixed not being able to run tests on Windows. #1153
+- Allow creation of sparse compound indexes. #1114
+- count on ListField of EmbeddedDocumentField fails. #1187
+
+Changes in 0.10.5
+=================
+- Fix for reloading of strict with special fields. #1156
+
+Changes in 0.10.4
+=================
+- SaveConditionError is now importable from the top level package. #1165
+- upsert_one method added. #1157
+
+Changes in 0.10.3
+=================
+- Fix `read_preference` (it had chaining issues with PyMongo 2.x and it didn't work at all with PyMongo 3.x) #1042
+
+Changes in 0.10.2
+=================
+- Allow shard key to point to a field in an embedded document. #551
+- Allow arbirary metadata in fields. #1129
+- ReferenceFields now support abstract document types. #837
+
+Changes in 0.10.1
+=================
+- Fix infinite recursion with CASCADE delete rules under specific conditions. #1046
+- Fix CachedReferenceField bug when loading cached docs as DBRef but failing to save them. #1047
+- Fix ignored chained options #842
+- Document save's save_condition error raises `SaveConditionError` exception #1070
+- Fix Document.reload for DynamicDocument. #1050
+- StrictDict & SemiStrictDict are shadowed at init time. #1105
+- Remove test dependencies (nose and rednose) from install dependencies list. #1079
+- Recursively build query when using elemMatch operator. #1130
+- Fix instance back references for lists of embedded documents. #1131
+
+Changes in 0.10.0
+=================
+- Django support was removed and will be available as a separate extension. #958
+- Allow to load undeclared field with meta attribute 'strict': False #957
+- Support for PyMongo 3+ #946
+- Removed get_or_create() deprecated since 0.8.0. #300
+- Improve Document._created status when switch collection and db #1020
+- Queryset update doesn't go through field validation #453
+- Added support for specifying authentication source as option `authSource` in URI. #967
+- Fixed mark_as_changed to handle higher/lower level fields changed. #927
+- ListField of embedded docs doesn't set the _instance attribute when iterating over it #914
+- Support += and *= for ListField #595
+- Use sets for populating dbrefs to dereference
+- Fixed unpickled documents replacing the global field's list. #888
+- Fixed storage of microseconds in ComplexDateTimeField and unused separator option. #910
+- Don't send a "cls" option to ensureIndex (related to https://jira.mongodb.org/browse/SERVER-769)
+- Fix for updating sorting in SortedListField. #978
+- Added __ support to escape field name in fields lookup keywords that match operators names #949
+- Fix for issue where FileField deletion did not free space in GridFS.
+- No_dereference() not respected on embedded docs containing reference. #517
+- Document save raise an exception if save_condition fails #1005
+- Fixes some internal _id handling issue. #961
+- Updated URL and Email Field regex validators, added schemes argument to URLField validation. #652
+- Capped collection multiple of 256. #1011
+- Added `BaseQuerySet.aggregate_sum` and `BaseQuerySet.aggregate_average` methods.
+- Fix for delete with write_concern {'w': 0}. #1008
+- Allow dynamic lookup for more than two parts. #882
+- Added support for min_distance on geo queries. #831
+- Allow to add custom metadata to fields #705
+
+Changes in 0.9.0
+================
+- Update FileField when creating a new file #714
+- Added `EmbeddedDocumentListField` for Lists of Embedded Documents. #826
+- ComplexDateTimeField should fall back to None when null=True #864
+- Request Support for $min, $max Field update operators #863
+- `BaseDict` does not follow `setdefault` #866
+- Add support for $type operator # 766
+- Fix tests for pymongo 2.8+ #877
+- No module named 'django.utils.importlib' (Django dev) #872
+- Field Choices Now Accept Subclasses of Documents
+- Ensure Indexes before Each Save #812
+- Generate Unique Indices for Lists of EmbeddedDocuments #358
+- Sparse fields #515
+- write_concern not in params of Collection#remove #801
+- Better BaseDocument equality check when not saved #798
+- OperationError: Shard Keys are immutable. Tried to update id even though the document is not yet saved #771
+- with_limit_and_skip for count should default like in pymongo #759
+- Fix storing value of precision attribute in DecimalField #787
+- Set attribute to None does not work (at least for fields with default values) #734
+- Querying by a field defined in a subclass raises InvalidQueryError #744
+- Add Support For MongoDB 2.6.X's maxTimeMS #778
+- abstract shouldn't be inherited in EmbeddedDocument # 789
+- Allow specifying the '_cls' as a field for indexes #397
+- Stop ensure_indexes running on a secondaries unless connection is through mongos #746
+- Not overriding default values when loading a subset of fields #399
+- Saving document doesn't create new fields in existing collection #620
+- Added `Queryset.aggregate` wrapper to aggregation framework #703
+- Added support to show original model fields on to_json calls instead of db_field #697
+- Added Queryset.search_text to Text indexes searchs #700
+- Fixed tests for Django 1.7 #696
+- Follow ReferenceFields in EmbeddedDocuments with select_related #690
+- Added preliminary support for text indexes #680
+- Added `elemMatch` operator as well - `match` is too obscure #653
+- Added support for progressive JPEG #486 #548
+- Allow strings to be used in index creation #675
+- Fixed EmbeddedDoc weakref proxy issue #592
+- Fixed nested reference field distinct error #583
+- Fixed change tracking on nested MapFields #539
+- Dynamic fields in embedded documents now visible to queryset.only() / qs.exclude() #425 #507
+- Add authentication_source option to register_connection #178 #464 #573 #580 #590
+- Implemented equality between Documents and DBRefs #597
+- Fixed ReferenceField inside nested ListFields dereferencing problem #368
+- Added the ability to reload specific document fields #100
+- Added db_alias support and fixes for custom map/reduce output #586
+- post_save signal now has access to delta information about field changes #594 #589
+- Don't query with $orderby for qs.get() #600
+- Fix id shard key save issue #636
+- Fixes issue with recursive embedded document errors #557
+- Fix clear_changed_fields() clearing unsaved documents bug #602
+- Removing support for Django 1.4.x, pymongo 2.5.x, pymongo 2.6.x.
+- Removing support for Python < 2.6.6
+- Fixed $maxDistance location for geoJSON $near queries with MongoDB 2.6+ #664
+- QuerySet.modify() and Document.modify() methods to provide find_and_modify() like behaviour #677 #773
+- Added support for the using() method on a queryset #676
+- PYPY support #673
+- Connection pooling #674
+- Avoid to open all documents from cursors in an if stmt #655
+- Ability to clear the ordering #657
+- Raise NotUniqueError in Document.update() on pymongo.errors.DuplicateKeyError #626
+- Slots - memory improvements #625
+- Fixed incorrectly split a query key when it ends with "_" #619
+- Geo docs updates #613
+- Workaround a dateutil bug #608
+- Conditional save for atomic-style operations #511
+- Allow dynamic dictionary-style field access #559
+- Increase email field length to accommodate new TLDs #726
+- index_cls is ignored when deciding to set _cls as index prefix #733
+- Make 'db' argument to connection optional #737
+- Allow atomic update for the entire `DictField` #742
+- Added MultiPointField, MultiLineField, MultiPolygonField
+- Fix multiple connections aliases being rewritten #748
+- Fixed a few instances where reverse_delete_rule was written as reverse_delete_rules. #791
+- Make `in_bulk()` respect `no_dereference()` #775
+- Handle None from model __str__; Fixes #753 #754
+- _get_changed_fields fix for embedded documents with id field. #925
+
 Changes in 0.8.7
 ================
-- Calling reload on deleted / nonexistant documents raises DoesNotExist (#538)
+- Calling reload on deleted / nonexistent documents raises DoesNotExist (#538)
 - Stop ensure_indexes running on a secondaries (#555)
 - Fix circular import issue with django auth (#531) (#545)
 
@@ -17,7 +177,7 @@ Changes in 0.8.5
 - Fix multi level nested fields getting marked as changed (#523)
 - Django 1.6 login fix (#522) (#527)
 - Django 1.6 session fix (#509)
-- EmbeddedDocument._instance is now set when settng the attribute (#506)
+- EmbeddedDocument._instance is now set when setting the attribute (#506)
 - Fixed EmbeddedDocument with ReferenceField equality issue (#502)
 - Fixed GenericReferenceField serialization order (#499)
 - Fixed count and none bug (#498)
@@ -107,7 +267,7 @@ Changes in 0.8.0
 - Added `get_next_value` preview for SequenceFields (#319)
 - Added no_sub_classes context manager and queryset helper (#312)
 - Querysets now utilises a local cache
-- Changed __len__ behavour in the queryset (#247, #311)
+- Changed __len__ behaviour in the queryset (#247, #311)
 - Fixed querying string versions of ObjectIds issue with ReferenceField (#307)
 - Added $setOnInsert support for upserts (#308)
 - Upserts now possible with just query parameters (#309)
@@ -158,7 +318,7 @@ Changes in 0.8.0
 - Uses getlasterror to test created on updated saves (#163)
 - Fixed inheritance and unique index creation (#140)
 - Fixed reverse delete rule with inheritance (#197)
-- Fixed validation for GenericReferences which havent been dereferenced
+- Fixed validation for GenericReferences which haven't been dereferenced
 - Added switch_db context manager (#106)
 - Added switch_db method to document instances (#106)
 - Added no_dereference context manager (#82) (#61)
@@ -240,11 +400,11 @@ Changes in 0.7.2
 - Update index spec generation so its not destructive (#113)
 
 Changes in 0.7.1
-=================
+================
 - Fixed index spec inheritance (#111)
 
 Changes in 0.7.0
-=================
+================
 - Updated queryset.delete so you can use with skip / limit (#107)
 - Updated index creation allows kwargs to be passed through refs (#104)
 - Fixed Q object merge edge case (#109)
@@ -325,7 +485,7 @@ Changes in 0.6.12
 - Fixes error with _delta handling DBRefs
 
 Changes in 0.6.11
-==================
+=================
 - Fixed inconsistency handling None values field attrs
 - Fixed map_field embedded db_field issue
 - Fixed .save() _delta issue with DbRefs
@@ -405,7 +565,7 @@ Changes in 0.6.1
 - Fix for replicaSet connections
 
 Changes in 0.6
-================
+==============
 
 - Added FutureWarning to inherited classes not declaring 'allow_inheritance' as the default will change in 0.7
 - Added support for covered indexes when inheritance is off
@@ -493,8 +653,8 @@ Changes in v0.5
 - Updated default collection naming convention
 - Added Document Mixin support
 - Fixed queryet __repr__ mid iteration
-- Added hint() support, so cantell Mongo the proper index to use for the query
-- Fixed issue with inconsitent setting of _cls breaking inherited referencing
+- Added hint() support, so can tell Mongo the proper index to use for the query
+- Fixed issue with inconsistent setting of _cls breaking inherited referencing
 - Added help_text and verbose_name to fields to help with some form libs
 - Updated item_frequencies to handle embedded document lookups
 - Added delta tracking now only sets / unsets explicitly changed fields

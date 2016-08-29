@@ -12,7 +12,7 @@ import gridfs
 from nose.plugins.skip import SkipTest
 from mongoengine import *
 from mongoengine.connection import get_db
-from mongoengine.python_support import PY3, b, StringIO
+from mongoengine.python_support import b, StringIO
 
 try:
     from PIL import Image
@@ -112,7 +112,43 @@ class FileTest(unittest.TestCase):
         result.the_file.delete()
 
         # Ensure deleted file returns None
-        self.assertTrue(result.the_file.read() == None)
+        self.assertTrue(result.the_file.read() is None)
+
+    def test_file_fields_stream_after_none(self):
+        """Ensure that a file field can be written to after it has been saved as
+        None
+        """
+        class StreamFile(Document):
+            the_file = FileField()
+
+        StreamFile.drop_collection()
+
+        text = b('Hello, World!')
+        more_text = b('Foo Bar')
+        content_type = 'text/plain'
+
+        streamfile = StreamFile()
+        streamfile.save()
+        streamfile.the_file.new_file()
+        streamfile.the_file.write(text)
+        streamfile.the_file.write(more_text)
+        streamfile.the_file.close()
+        streamfile.save()
+
+        result = StreamFile.objects.first()
+        self.assertTrue(streamfile == result)
+        self.assertEqual(result.the_file.read(), text + more_text)
+        # self.assertEqual(result.the_file.content_type, content_type)
+        result.the_file.seek(0)
+        self.assertEqual(result.the_file.tell(), 0)
+        self.assertEqual(result.the_file.read(len(text)), text)
+        self.assertEqual(result.the_file.tell(), len(text))
+        self.assertEqual(result.the_file.read(len(more_text)), more_text)
+        self.assertEqual(result.the_file.tell(), len(text + more_text))
+        result.the_file.delete()
+
+        # Ensure deleted file returns None
+        self.assertTrue(result.the_file.read() is None)
 
     def test_file_fields_set(self):
 
@@ -261,6 +297,71 @@ class FileTest(unittest.TestCase):
         test_file = TestFile()
         self.assertFalse(test_file.the_file in [{"test": 1}])
 
+    def test_file_disk_space(self): 
+        """ Test disk space usage when we delete/replace a file """ 
+        class TestFile(Document):
+            the_file = FileField()
+            
+        text = b('Hello, World!')
+        content_type = 'text/plain'
+
+        testfile = TestFile()
+        testfile.the_file.put(text, content_type=content_type, filename="hello")
+        testfile.save()
+        
+        # Now check fs.files and fs.chunks 
+        db = TestFile._get_db()
+        
+        files = db.fs.files.find()
+        chunks = db.fs.chunks.find()
+        self.assertEquals(len(list(files)), 1)
+        self.assertEquals(len(list(chunks)), 1)
+
+        # Deleting the docoument should delete the files 
+        testfile.delete()
+        
+        files = db.fs.files.find()
+        chunks = db.fs.chunks.find()
+        self.assertEquals(len(list(files)), 0)
+        self.assertEquals(len(list(chunks)), 0)
+        
+        # Test case where we don't store a file in the first place 
+        testfile = TestFile()
+        testfile.save()
+        
+        files = db.fs.files.find()
+        chunks = db.fs.chunks.find()
+        self.assertEquals(len(list(files)), 0)
+        self.assertEquals(len(list(chunks)), 0)
+        
+        testfile.delete()
+        
+        files = db.fs.files.find()
+        chunks = db.fs.chunks.find()
+        self.assertEquals(len(list(files)), 0)
+        self.assertEquals(len(list(chunks)), 0)
+        
+        # Test case where we overwrite the file 
+        testfile = TestFile()
+        testfile.the_file.put(text, content_type=content_type, filename="hello")
+        testfile.save()
+        
+        text = b('Bonjour, World!')
+        testfile.the_file.replace(text, content_type=content_type, filename="hello")
+        testfile.save()
+        
+        files = db.fs.files.find()
+        chunks = db.fs.chunks.find()
+        self.assertEquals(len(list(files)), 1)
+        self.assertEquals(len(list(chunks)), 1)
+        
+        testfile.delete()
+        
+        files = db.fs.files.find()
+        chunks = db.fs.chunks.find()
+        self.assertEquals(len(list(files)), 0)
+        self.assertEquals(len(list(chunks)), 0)
+
     def test_image_field(self):
         if not HAS_PIL:
             raise SkipTest('PIL not installed')
@@ -279,7 +380,7 @@ class FileTest(unittest.TestCase):
                 t.image.put(f)
                 self.fail("Should have raised an invalidation error")
             except ValidationError, e:
-                self.assertEqual("%s" % e, "Invalid image: cannot identify image file")
+                self.assertEqual("%s" % e, "Invalid image: cannot identify image file %s" % f)
 
         t = TestImage()
         t.image.put(open(TEST_IMAGE_PATH, 'rb'))

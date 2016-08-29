@@ -38,7 +38,7 @@ class QuerySet(BaseQuerySet):
 
     def __len__(self):
         """Since __len__ is called quite frequently (for example, as part of
-        list(qs) we populate the result cache and cache the length.
+        list(qs)), we populate the result cache and cache the length.
         """
         if self._len is not None:
             return self._len
@@ -61,7 +61,6 @@ class QuerySet(BaseQuerySet):
             data[-1] = "...(remaining elements truncated)..."
         return repr(data)
 
-
     def _iter_results(self):
         """A generator for iterating over the result cache.
 
@@ -74,7 +73,7 @@ class QuerySet(BaseQuerySet):
             upper = len(self._result_cache)
             while pos < upper:
                 yield self._result_cache[pos]
-                pos = pos + 1
+                pos += 1
             if not self._has_more:
                 raise StopIteration
             if len(self._result_cache) <= pos:
@@ -94,7 +93,7 @@ class QuerySet(BaseQuerySet):
             except StopIteration:
                 self._has_more = False
 
-    def count(self, with_limit_and_skip=True):
+    def count(self, with_limit_and_skip=False):
         """Count the selected elements in the query.
 
         :param with_limit_and_skip (optional): take any :meth:`limit` or
@@ -155,3 +154,10 @@ class QuerySetNoCache(BaseQuerySet):
             queryset = self.clone()
         queryset.rewind()
         return queryset
+
+
+class QuerySetNoDeRef(QuerySet):
+    """Special no_dereference QuerySet"""
+
+    def __dereference(items, max_depth=1, instance=None, name=None):
+        return items

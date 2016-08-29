@@ -197,5 +197,42 @@ class TransformTest(unittest.TestCase):
         update = transform.update(Location, set__poly={"type": "Polygon", "coordinates": [[[40, 5], [40, 6], [41, 6], [40, 5]]]})
         self.assertEqual(update, {'$set': {'poly': {"type": "Polygon", "coordinates": [[[40, 5], [40, 6], [41, 6], [40, 5]]]}}})
 
+    def test_type(self):
+        class Doc(Document):
+            df = DynamicField()
+        Doc(df=True).save()
+        Doc(df=7).save()
+        Doc(df="df").save()
+        self.assertEqual(Doc.objects(df__type=1).count(), 0)  # double
+        self.assertEqual(Doc.objects(df__type=8).count(), 1)  # bool
+        self.assertEqual(Doc.objects(df__type=2).count(), 1)  # str
+        self.assertEqual(Doc.objects(df__type=16).count(), 1)  # int
+
+    def test_last_field_name_like_operator(self):
+        class EmbeddedItem(EmbeddedDocument):
+            type = StringField()
+            name = StringField()
+
+        class Doc(Document):
+            item = EmbeddedDocumentField(EmbeddedItem)
+
+        Doc.drop_collection()
+
+        doc = Doc(item=EmbeddedItem(type="axe", name="Heroic axe"))
+        doc.save()
+
+        self.assertEqual(1, Doc.objects(item__type__="axe").count())
+        self.assertEqual(1, Doc.objects(item__name__="Heroic axe").count())
+
+    def test_understandable_error_raised(self):
+        class Event(Document):
+            title = StringField()
+            location = GeoPointField()
+
+        box = [(35.0, -125.0), (40.0, -100.0)]
+        # I *meant* to execute location__within_box=box
+        events = Event.objects(location__within=box)
+        self.assertRaises(InvalidQueryError, lambda: events.count())
+
 if __name__ == '__main__':
     unittest.main()

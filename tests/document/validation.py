@@ -141,6 +141,77 @@ class ValidatorErrorTest(unittest.TestCase):
             self.assertEqual(e.to_dict(), {
                 "e": {'val': 'OK could not be converted to int'}})
 
+    def test_embedded_weakref(self):
+
+        class SubDoc(EmbeddedDocument):
+            val = IntField(required=True)
+
+        class Doc(Document):
+            e = EmbeddedDocumentField(SubDoc, db_field='eb')
+
+        Doc.drop_collection()
+
+        d1 = Doc()
+        d2 = Doc()
+
+        s = SubDoc()
+
+        self.assertRaises(ValidationError, lambda: s.validate())
+
+        d1.e = s
+        d2.e = s
+
+        del d1
+
+        self.assertRaises(ValidationError, lambda: d2.validate())
+
+    def test_parent_reference_in_child_document(self):
+        """
+        Test to ensure a ReferenceField can store a reference to a parent
+        class when inherited. Issue #954.
+        """
+        class Parent(Document):
+            meta = {'allow_inheritance': True}
+            reference = ReferenceField('self')
+
+        class Child(Parent):
+            pass
+
+        parent = Parent()
+        parent.save()
+
+        child = Child(reference=parent)
+
+        # Saving child should not raise a ValidationError
+        try:
+            child.save()
+        except ValidationError as e:
+            self.fail("ValidationError raised: %s" % e.message)
+
+    def test_parent_reference_set_as_attribute_in_child_document(self):
+        """
+        Test to ensure a ReferenceField can store a reference to a parent
+        class when inherited and when set via attribute. Issue #954.
+        """
+        class Parent(Document):
+            meta = {'allow_inheritance': True}
+            reference = ReferenceField('self')
+
+        class Child(Parent):
+            pass
+
+        parent = Parent()
+        parent.save()
+
+        child = Child()
+        child.reference = parent
+
+        # Saving the child should not raise a ValidationError
+        try:
+            child.save()
+        except ValidationError as e:
+            self.fail("ValidationError raised: %s" % e.message)
+
 
 if __name__ == '__main__':
     unittest.main()

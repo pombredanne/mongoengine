@@ -17,7 +17,7 @@ fetch documents from the database::
 
     As of MongoEngine 0.8 the querysets utilise a local cache.  So iterating
     it multiple times will only cause a single query.  If this is not the
-    desired behavour you can call :class:`~mongoengine.QuerySet.no_cache`
+    desired behaviour you can call :class:`~mongoengine.QuerySet.no_cache`
     (version **0.8.3+**) to return a non-caching queryset.
 
 Filtering queries
@@ -39,10 +39,18 @@ syntax::
     # been written by a user whose 'country' field is set to 'uk'
     uk_pages = Page.objects(author__country='uk')
 
+.. note::
+
+   (version **0.9.1+**) if your field name is like mongodb operator name (for example
+   type, lte, lt...) and you want to place it at the end of lookup keyword
+   mongoengine automatically  prepend $ to it. To avoid this use  __ at the end of
+   your lookup keyword. For example if your field name is ``type`` and you want to
+   query by this field you must use ``.objects(user__type__="admin")`` instead of
+   ``.objects(user__type="admin")``
 
 Query operators
 ===============
-Operators other than equality may also be used in queries; just attach the
+Operators other than equality may also be used in queries --- just attach the
 operator name to a key with a double-underscore::
 
     # Only find users whose age is 18 or less
@@ -84,19 +92,20 @@ expressions:
 Geo queries
 -----------
 
-There are a few special operators for performing geographical queries. The following
-were added in 0.8 for:  :class:`~mongoengine.fields.PointField`,
+There are a few special operators for performing geographical queries.
+The following were added in MongoEngine 0.8 for
+:class:`~mongoengine.fields.PointField`,
 :class:`~mongoengine.fields.LineStringField` and
 :class:`~mongoengine.fields.PolygonField`:
 
-* ``geo_within`` -- Check if a geometry is within a polygon.  For ease of use
-    it accepts either a geojson geometry or just the polygon coordinates eg::
+* ``geo_within`` -- check if a geometry is within a polygon. For ease of use
+  it accepts either a geojson geometry or just the polygon coordinates eg::
 
         loc.objects(point__geo_within=[[[40, 5], [40, 6], [41, 6], [40, 5]]])
         loc.objects(point__geo_within={"type": "Polygon",
                                  "coordinates": [[[40, 5], [40, 6], [41, 6], [40, 5]]]})
 
-* ``geo_within_box`` - simplified geo_within searching with a box eg::
+* ``geo_within_box`` -- simplified geo_within searching with a box eg::
 
         loc.objects(point__geo_within_box=[(-125.0, 35.0), (-100.0, 40.0)])
         loc.objects(point__geo_within_box=[<bottom left coordinates>, <upper right coordinates>])
@@ -132,23 +141,22 @@ were added in 0.8 for:  :class:`~mongoengine.fields.PointField`,
         loc.objects(poly__geo_intersects={"type": "Polygon",
                                           "coordinates": [[[40, 5], [40, 6], [41, 6], [41, 5], [40, 5]]]})
 
-* ``near`` -- Find all the locations near a given point::
+* ``near`` -- find all the locations near a given point::
 
         loc.objects(point__near=[40, 5])
         loc.objects(point__near={"type": "Point", "coordinates": [40, 5]})
 
-
-    You can also set the maximum distance in meters as well::
+  You can also set the maximum and/or the minimum distance in meters as well::
 
         loc.objects(point__near=[40, 5], point__max_distance=1000)
-
+        loc.objects(point__near=[40, 5], point__min_distance=100)
 
 The older 2D indexes are still supported with the
 :class:`~mongoengine.fields.GeoPointField`:
 
 * ``within_distance`` -- provide a list containing a point and a maximum
   distance (e.g. [(41.342, -87.653), 5])
-* ``within_spherical_distance`` -- Same as above but using the spherical geo model
+* ``within_spherical_distance`` -- same as above but using the spherical geo model
   (e.g. [(41.342, -87.653), 5/earth_radius])
 * ``near`` -- order the documents by how close they are to a given point
 * ``near_sphere`` -- Same as above but using the spherical geo model
@@ -161,7 +169,8 @@ The older 2D indexes are still supported with the
 
 * ``max_distance`` -- can be added to your location queries to set a maximum
   distance.
-
+* ``min_distance`` -- can be added to your location queries to set a minimum
+  distance.
 
 Querying lists
 --------------
@@ -198,12 +207,14 @@ However, this doesn't map well to the syntax so you can also use a capital S ins
 
     Post.objects(comments__by="joe").update(inc__comments__S__votes=1)
 
-    .. note:: Due to Mongo currently the $ operator only applies to the first matched item in the query.
+.. note::
+    Due to :program:`Mongo`, currently the $ operator only applies to the
+    first matched item in the query.
 
 
 Raw queries
 -----------
-It is possible to provide a raw PyMongo query as a query parameter, which will
+It is possible to provide a raw :mod:`PyMongo` query as a query parameter, which will
 be integrated directly into the query. This is done using the ``__raw__``
 keyword argument::
 
@@ -213,12 +224,12 @@ keyword argument::
 
 Limiting and skipping results
 =============================
-Just as with traditional ORMs, you may limit the number of results returned, or
+Just as with traditional ORMs, you may limit the number of results returned or
 skip a number or results in you query.
 :meth:`~mongoengine.queryset.QuerySet.limit` and
 :meth:`~mongoengine.queryset.QuerySet.skip` and methods are available on
-:class:`~mongoengine.queryset.QuerySet` objects, but the prefered syntax for
-achieving this is using array-slicing syntax::
+:class:`~mongoengine.queryset.QuerySet` objects, but the `array-slicing` syntax
+is preferred for achieving this::
 
     # Only the first 5 people
     users = User.objects[:5]
@@ -226,7 +237,7 @@ achieving this is using array-slicing syntax::
     # All except for the first 5 people
     users = User.objects[5:]
 
-    # 5 users, starting from the 10th user found
+    # 5 users, starting from the 11th user found
     users = User.objects[10:15]
 
 You may also index the query to retrieve a single result. If an item at that
@@ -252,23 +263,17 @@ To retrieve a result that should be unique in the collection, use
 no document matches the query, and
 :class:`~mongoengine.queryset.MultipleObjectsReturned`
 if more than one document matched the query.  These exceptions are merged into
-your document defintions eg: `MyDoc.DoesNotExist`
+your document definitions eg: `MyDoc.DoesNotExist`
 
-A variation of this method exists,
-:meth:`~mongoengine.queryset.Queryset.get_or_create`, that will create a new
-document with the query arguments if no documents match the query. An
-additional keyword argument, :attr:`defaults` may be provided, which will be
-used as default values for the new document, in the case that it should need
-to be created::
-
-    >>> a, created = User.objects.get_or_create(name='User A', defaults={'age': 30})
-    >>> b, created = User.objects.get_or_create(name='User A', defaults={'age': 40})
-    >>> a.name == b.name and a.age == b.age
-    True
+A variation of this method, get_or_create() existed, but it was unsafe. It
+could not be made safe, because there are no transactions in mongoDB. Other
+approaches should be investigated, to ensure you don't accidentally duplicate
+data when using something similar to this method. Therefore it was deprecated
+in 0.8 and removed in 0.10.
 
 Default Document queries
 ========================
-By default, the objects :attr:`~mongoengine.Document.objects` attribute on a
+By default, the objects :attr:`~Document.objects` attribute on a
 document returns a :class:`~mongoengine.queryset.QuerySet` that doesn't filter
 the collection -- it returns all objects. This may be changed by defining a
 method on a document that modifies a queryset. The method should accept two
@@ -311,7 +316,7 @@ Should you want to add custom methods for interacting with or filtering
 documents, extending the :class:`~mongoengine.queryset.QuerySet` class may be
 the way to go. To use a custom :class:`~mongoengine.queryset.QuerySet` class on
 a document, set ``queryset_class`` to the custom class in a
-:class:`~mongoengine.Document`\ s ``meta`` dictionary::
+:class:`~mongoengine.Document`'s ``meta`` dictionary::
 
     class AwesomerQuerySet(QuerySet):
 
@@ -341,6 +346,8 @@ Just as with limiting and skipping results, there is a method on
 way of achieving this::
 
     num_users = len(User.objects)
+
+Even if len() is the Pythonic way of counting results, keep in mind that if you concerned about performance, :meth:`~mongoengine.queryset.QuerySet.count` is the way to go since it only execute a server side count query, while len() retrieves the results, places them in cache, and finally counts them. If we compare the performance of the two operations, len() is much slower than :meth:`~mongoengine.queryset.QuerySet.count`.
 
 Further aggregation
 -------------------
@@ -488,21 +495,27 @@ calling it with keyword arguments::
 Atomic updates
 ==============
 Documents may be updated atomically by using the
-:meth:`~mongoengine.queryset.QuerySet.update_one` and
-:meth:`~mongoengine.queryset.QuerySet.update` methods on a
-:meth:`~mongoengine.queryset.QuerySet`. There are several different "modifiers"
-that you may use with these methods:
+:meth:`~mongoengine.queryset.QuerySet.update_one`,
+:meth:`~mongoengine.queryset.QuerySet.update` and
+:meth:`~mongoengine.queryset.QuerySet.modify` methods on a
+:class:`~mongoengine.queryset.QuerySet` or
+:meth:`~mongoengine.Document.modify` and
+:meth:`~mongoengine.Document.save` (with :attr:`save_condition` argument) on a
+:class:`~mongoengine.Document`.
+There are several different "modifiers" that you may use with these methods:
 
 * ``set`` -- set a particular value
-* ``unset`` -- delete a particular value (since MongoDB v1.3+)
+* ``unset`` -- delete a particular value (since MongoDB v1.3)
 * ``inc`` -- increment a value by a given amount
 * ``dec`` -- decrement a value by a given amount
 * ``push`` -- append a value to a list
 * ``push_all`` -- append several values to a list
-* ``pop`` -- remove the first or last element of a list
+* ``pop`` -- remove the first or last element of a list `depending on the value`_
 * ``pull`` -- remove a value from a list
 * ``pull_all`` -- remove several values from a list
 * ``add_to_set`` -- add value to a list only if its not in the list already
+
+.. _depending on the value: http://docs.mongodb.org/manual/reference/operator/update/pop/
 
 The syntax for atomic updates is similar to the querying syntax, but the
 modifier comes before the field, not after it::
@@ -521,6 +534,13 @@ modifier comes before the field, not after it::
     >>> post.reload()
     >>> post.tags
     ['database', 'nosql']
+
+.. note::
+
+    If no modifier operator is specified the default will be ``$set``. So the following sentences are identical::
+
+        >>> BlogPost.objects(id=post.id).update(title='Example Post')
+        >>> BlogPost.objects(id=post.id).update(set__title='Example Post')
 
 .. note::
 
@@ -580,7 +600,7 @@ Some variables are made available in the scope of the Javascript function:
 
 The following example demonstrates the intended usage of
 :meth:`~mongoengine.queryset.QuerySet.exec_js` by defining a function that sums
-over a field on a document (this functionality is already available throught
+over a field on a document (this functionality is already available through
 :meth:`~mongoengine.queryset.QuerySet.sum` but is shown here for sake of
 example)::
 

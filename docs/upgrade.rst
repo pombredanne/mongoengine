@@ -2,10 +2,20 @@
 Upgrading
 #########
 
+0.9.0
+*****
+
+The 0.8.7 package on pypi was corrupted.  If upgrading from 0.8.7 to 0.9.0 please follow: ::
+
+    pip uninstall pymongo
+    pip uninstall mongoengine
+    pip install pymongo==2.8
+    pip install mongoengine
+
 0.8.7
 *****
 
-Calling reload on deleted / nonexistant documents now raises a DoesNotExist
+Calling reload on deleted / nonexistent documents now raises a DoesNotExist
 exception.
 
 
@@ -263,7 +273,7 @@ update your code like so: ::
     [m for m in mammals]                                               # This will return all carnivores
 
 Len iterates the queryset
---------------------------
+-------------------------
 
 If you ever did `len(queryset)` it previously did a `count()` under the covers,
 this caused some unusual issues.  As `len(queryset)` is most often used by

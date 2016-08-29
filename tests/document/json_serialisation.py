@@ -20,6 +20,28 @@ class TestJson(unittest.TestCase):
     def setUp(self):
         connect(db='mongoenginetest')
 
+    def test_json_names(self):
+        """
+        Going to test reported issue:
+            https://github.com/MongoEngine/mongoengine/issues/654
+        where the reporter asks for the availability to perform
+        a to_json with the original class names and not the abreviated
+        mongodb document keys
+        """
+        class Embedded(EmbeddedDocument):
+            string = StringField(db_field='s')
+
+        class Doc(Document):
+            string = StringField(db_field='s')
+            embedded = EmbeddedDocumentField(Embedded, db_field='e')
+
+        doc = Doc( string="Hello", embedded=Embedded(string="Inner Hello"))
+        doc_json = doc.to_json(sort_keys=True, use_db_field=False,separators=(',', ':'))
+
+        expected_json = """{"embedded":{"string":"Inner Hello"},"string":"Hello"}"""
+
+        self.assertEqual( doc_json, expected_json)
+
     def test_json_simple(self):
 
         class Embedded(EmbeddedDocument):
@@ -28,6 +50,10 @@ class TestJson(unittest.TestCase):
         class Doc(Document):
             string = StringField()
             embedded_field = EmbeddedDocumentField(Embedded)
+
+            def __eq__(self, other):
+                return (self.string == other.string and
+                        self.embedded_field == other.embedded_field)
 
         doc = Doc(string="Hi", embedded_field=Embedded(string="Hi"))
 
@@ -76,6 +102,10 @@ class TestJson(unittest.TestCase):
             uuid_field = UUIDField(default=uuid.uuid4)
             generic_embedded_document_field = GenericEmbeddedDocumentField(
                                         default=lambda: EmbeddedDoc())
+
+            def __eq__(self, other):
+                import json
+                return json.loads(self.to_json()) == json.loads(other.to_json())
 
         doc = Doc()
         self.assertEqual(doc, Doc.from_json(doc.to_json()))

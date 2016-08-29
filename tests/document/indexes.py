@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 import unittest
 import sys
+
 sys.path[0:0] = [""]
 
-import os
 import pymongo
+from random import randint
 
 from nose.plugins.skip import SkipTest
 from datetime import datetime
@@ -16,9 +17,11 @@ __all__ = ("IndexesTest", )
 
 
 class IndexesTest(unittest.TestCase):
+    _MAX_RAND = 10 ** 10
 
     def setUp(self):
-        connect(db='mongoenginetest')
+        self.db_name = 'mongoenginetest_IndexesTest_' + str(randint(0, self._MAX_RAND))
+        self.connection = connect(db=self.db_name)
         self.db = get_db()
 
         class Person(Document):
@@ -32,10 +35,7 @@ class IndexesTest(unittest.TestCase):
         self.Person = Person
 
     def tearDown(self):
-        for collection in self.db.collection_names():
-            if 'system.' in collection:
-                continue
-            self.db.drop_collection(collection)
+        self.connection.drop_database(self.db)
 
     def test_indexes_document(self):
         """Ensure that indexes are used when meta[indexes] is specified for
@@ -143,7 +143,7 @@ class IndexesTest(unittest.TestCase):
             meta = {
                 'indexes': [
                         {
-                        'fields': ('title',),
+                            'fields': ('title',),
                         },
                 ],
                 'allow_inheritance': True,
@@ -174,6 +174,16 @@ class IndexesTest(unittest.TestCase):
         A.ensure_indexes()
         info = A._get_collection().index_information()
         self.assertEqual(len(info.keys()), 2)
+
+        class B(A):
+            c = StringField()
+            d = StringField()
+            meta = {
+                'indexes': [{'fields': ['c']}, {'fields': ['d'], 'cls': True}],
+                'allow_inheritance': True
+            }
+        self.assertEqual([('c', 1)], B._meta['index_specs'][1]['fields'])
+        self.assertEqual([('_cls', 1), ('d', 1)], B._meta['index_specs'][2]['fields'])
 
     def test_build_index_spec_is_not_destructive(self):
 
@@ -264,6 +274,60 @@ class IndexesTest(unittest.TestCase):
         info = Place._get_collection().index_information()
         info = [value['key'] for key, value in info.iteritems()]
         self.assertTrue([('current.location.point', '2d')] in info)
+
+    def test_explicit_geosphere_index(self):
+        """Ensure that geosphere indexes work when created via meta[indexes]
+        """
+        class Place(Document):
+            location = DictField()
+            meta = {
+                'allow_inheritance': True,
+                'indexes': [
+                    '(location.point',
+                ]
+            }
+
+        self.assertEqual([{'fields': [('location.point', '2dsphere')]}],
+                         Place._meta['index_specs'])
+
+        Place.ensure_indexes()
+        info = Place._get_collection().index_information()
+        info = [value['key'] for key, value in info.iteritems()]
+        self.assertTrue([('location.point', '2dsphere')] in info)
+
+    def test_explicit_geohaystack_index(self):
+        """Ensure that geohaystack indexes work when created via meta[indexes]
+        """
+        raise SkipTest('GeoHaystack index creation is not supported for now'
+                       'from meta, as it requires a bucketSize parameter.')
+
+        class Place(Document):
+            location = DictField()
+            name = StringField()
+            meta = {
+                'indexes': [
+                    (')location.point', 'name')
+                ]
+            }
+        self.assertEqual([{'fields': [('location.point', 'geoHaystack'), ('name', 1)]}],
+                         Place._meta['index_specs'])
+
+        Place.ensure_indexes()
+        info = Place._get_collection().index_information()
+        info = [value['key'] for key, value in info.iteritems()]
+        self.assertTrue([('location.point', 'geoHaystack')] in info)
+
+    def test_create_geohaystack_index(self):
+        """Ensure that geohaystack indexes can be created
+        """
+        class Place(Document):
+            location = DictField()
+            name = StringField()
+
+        Place.create_index({'fields': (')location.point', 'name')}, bucketSize=10)
+        info = Place._get_collection().index_information()
+        info = [value['key'] for key, value in info.iteritems()]
+        self.assertTrue([('location.point', 'geoHaystack'), ('name', 1)] in info)
 
     def test_dictionary_indexes(self):
         """Ensure that indexes are used when meta[indexes] contains
@@ -422,6 +486,7 @@ class IndexesTest(unittest.TestCase):
 
         class Test(Document):
             a = IntField()
+            b = IntField()
 
             meta = {
                 'indexes': ['a'],
@@ -433,16 +498,36 @@ class IndexesTest(unittest.TestCase):
         obj = Test(a=1)
         obj.save()
 
+        connection = get_connection()
+        IS_MONGODB_3 = connection.server_info()['versionArray'][0] >= 3
+
         # Need to be explicit about covered indexes as mongoDB doesn't know if
         # the documents returned might have more keys in that here.
         query_plan = Test.objects(id=obj.id).exclude('a').explain()
-        self.assertFalse(query_plan['indexOnly'])
+        if not IS_MONGODB_3:
+            self.assertFalse(query_plan['indexOnly'])
+        else:
+            self.assertEqual(query_plan.get('queryPlanner').get('winningPlan').get('inputStage').get('stage'), 'IDHACK')
 
         query_plan = Test.objects(id=obj.id).only('id').explain()
-        self.assertTrue(query_plan['indexOnly'])
+        if not IS_MONGODB_3:
+            self.assertTrue(query_plan['indexOnly'])
+        else:
+            self.assertEqual(query_plan.get('queryPlanner').get('winningPlan').get('inputStage').get('stage'), 'IDHACK')
 
         query_plan = Test.objects(a=1).only('a').exclude('id').explain()
-        self.assertTrue(query_plan['indexOnly'])
+        if not IS_MONGODB_3:
+            self.assertTrue(query_plan['indexOnly'])
+        else:
+            self.assertEqual(query_plan.get('queryPlanner').get('winningPlan').get('inputStage').get('stage'), 'IXSCAN')
+            self.assertEqual(query_plan.get('queryPlanner').get('winningPlan').get('stage'), 'PROJECTION')
+
+        query_plan = Test.objects(a=1).explain()
+        if not IS_MONGODB_3:
+            self.assertFalse(query_plan['indexOnly'])
+        else:
+            self.assertEqual(query_plan.get('queryPlanner').get('winningPlan').get('inputStage').get('stage'), 'IXSCAN')
+            self.assertEqual(query_plan.get('queryPlanner').get('winningPlan').get('stage'), 'FETCH')
 
     def test_index_on_id(self):
 
@@ -481,16 +566,22 @@ class IndexesTest(unittest.TestCase):
 
         self.assertEqual(BlogPost.objects.count(), 10)
         self.assertEqual(BlogPost.objects.hint().count(), 10)
-        self.assertEqual(BlogPost.objects.hint([('tags', 1)]).count(), 10)
 
-        self.assertEqual(BlogPost.objects.hint([('ZZ', 1)]).count(), 10)
+        # PyMongo 3.0 bug only, works correctly with 2.X and 3.0.1+ versions
+        if pymongo.version != '3.0':
+            self.assertEqual(BlogPost.objects.hint([('tags', 1)]).count(), 10)
 
-        def invalid_index():
-            BlogPost.objects.hint('tags')
-        self.assertRaises(TypeError, invalid_index)
+            self.assertEqual(BlogPost.objects.hint([('ZZ', 1)]).count(), 10)
+
+        if pymongo.version >= '2.8':
+            self.assertEqual(BlogPost.objects.hint('tags').count(), 10)
+        else:
+            def invalid_index():
+                BlogPost.objects.hint('tags').next()
+            self.assertRaises(TypeError, invalid_index)
 
         def invalid_index_2():
-            return BlogPost.objects.hint(('tags', 1))
+            return BlogPost.objects.hint(('tags', 1)).next()
         self.assertRaises(Exception, invalid_index_2)
 
     def test_unique(self):
@@ -564,6 +655,38 @@ class IndexesTest(unittest.TestCase):
         post3 = BlogPost(title='test3',
                          sub=SubDocument(year=2010, slug='test'))
         self.assertRaises(NotUniqueError, post3.save)
+
+        BlogPost.drop_collection()
+
+    def test_unique_embedded_document_in_list(self):
+        """
+        Ensure that the uniqueness constraints are applied to fields in
+        embedded documents, even when the embedded documents in in a
+        list field.
+        """
+        class SubDocument(EmbeddedDocument):
+            year = IntField(db_field='yr')
+            slug = StringField(unique=True)
+
+        class BlogPost(Document):
+            title = StringField()
+            subs = ListField(EmbeddedDocumentField(SubDocument))
+
+        BlogPost.drop_collection()
+
+        post1 = BlogPost(
+            title='test1', subs=[
+                SubDocument(year=2009, slug='conflict'),
+                SubDocument(year=2009, slug='conflict')
+            ]
+        )
+        post1.save()
+
+        post2 = BlogPost(
+            title='test2', subs=[SubDocument(year=2014, slug='conflict')]
+        )
+
+        self.assertRaises(NotUniqueError, post2.save)
 
         BlogPost.drop_collection()
 
@@ -699,33 +822,205 @@ class IndexesTest(unittest.TestCase):
             name = StringField(required=True)
             term = StringField(required=True)
 
-        class Report(Document):
+        class ReportEmbedded(Document):
             key = EmbeddedDocumentField(CompoundKey, primary_key=True)
             text = StringField()
 
-        Report.drop_collection()
-
         my_key = CompoundKey(name="n", term="ok")
-        report = Report(text="OK", key=my_key).save()
+        report = ReportEmbedded(text="OK", key=my_key).save()
 
         self.assertEqual({'text': 'OK', '_id': {'term': 'ok', 'name': 'n'}},
                          report.to_mongo())
-        self.assertEqual(report, Report.objects.get(pk=my_key))
+        self.assertEqual(report, ReportEmbedded.objects.get(pk=my_key))
 
     def test_compound_key_dictfield(self):
 
-        class Report(Document):
+        class ReportDictField(Document):
             key = DictField(primary_key=True)
             text = StringField()
 
-        Report.drop_collection()
-
         my_key = {"name": "n", "term": "ok"}
-        report = Report(text="OK", key=my_key).save()
+        report = ReportDictField(text="OK", key=my_key).save()
 
         self.assertEqual({'text': 'OK', '_id': {'term': 'ok', 'name': 'n'}},
                          report.to_mongo())
-        self.assertEqual(report, Report.objects.get(pk=my_key))
+        self.assertEqual(report, ReportDictField.objects.get(pk=my_key))
+
+    def test_string_indexes(self):
+
+        class MyDoc(Document):
+            provider_ids = DictField()
+            meta = {
+                "indexes": ["provider_ids.foo", "provider_ids.bar"],
+            }
+
+        info = MyDoc.objects._collection.index_information()
+        info = [value['key'] for key, value in info.iteritems()]
+        self.assertTrue([('provider_ids.foo', 1)] in info)
+        self.assertTrue([('provider_ids.bar', 1)] in info)
+
+    def test_sparse_compound_indexes(self):
+
+        class MyDoc(Document):
+            provider_ids = DictField()
+            meta = {
+                "indexes": [{'fields': ("provider_ids.foo", "provider_ids.bar"),
+                             'sparse': True}],
+            }
+
+        info = MyDoc.objects._collection.index_information()
+        self.assertEqual([('provider_ids.foo', 1), ('provider_ids.bar', 1)],
+                         info['provider_ids.foo_1_provider_ids.bar_1']['key'])
+        self.assertTrue(info['provider_ids.foo_1_provider_ids.bar_1']['sparse'])
+
+    def test_text_indexes(self):
+
+        class Book(Document):
+            title = DictField()
+            meta = {
+                "indexes": ["$title"],
+            }
+
+        indexes = Book.objects._collection.index_information()
+        self.assertTrue("title_text" in indexes)
+        key = indexes["title_text"]["key"]
+        self.assertTrue(('_fts', 'text') in key)
+
+    def test_hashed_indexes(self):
+
+        class Book(Document):
+            ref_id = StringField()
+            meta = {
+                "indexes": ["#ref_id"],
+            }
+
+        indexes = Book.objects._collection.index_information()
+        self.assertTrue("ref_id_hashed" in indexes)
+        self.assertTrue(('ref_id', 'hashed') in indexes["ref_id_hashed"]["key"])
+
+    def test_indexes_after_database_drop(self):
+        """
+        Test to ensure that indexes are re-created on a collection even
+        after the database has been dropped.
+
+        Issue #812
+        """
+        # Use a new connection and database since dropping the database could
+        # cause concurrent tests to fail.
+        connection = connect(db='tempdatabase',
+                             alias='test_indexes_after_database_drop')
+
+        class BlogPost(Document):
+            title = StringField()
+            slug = StringField(unique=True)
+
+            meta = {'db_alias': 'test_indexes_after_database_drop'}
+
+        try:
+            BlogPost.drop_collection()
+
+            # Create Post #1
+            post1 = BlogPost(title='test1', slug='test')
+            post1.save()
+
+            # Drop the Database
+            connection.drop_database('tempdatabase')
+
+            # Re-create Post #1
+            post1 = BlogPost(title='test1', slug='test')
+            post1.save()
+
+            # Create Post #2
+            post2 = BlogPost(title='test2', slug='test')
+            self.assertRaises(NotUniqueError, post2.save)
+        finally:
+            # Drop the temporary database at the end
+            connection.drop_database('tempdatabase')
+
+
+    def test_index_dont_send_cls_option(self):
+        """
+        Ensure that 'cls' option is not sent through ensureIndex. We shouldn't
+        send internal MongoEngine arguments that are not a part of the index
+        spec.
+
+        This is directly related to the fact that MongoDB doesn't validate the
+        options that are passed to ensureIndex. For more details, see:
+        https://jira.mongodb.org/browse/SERVER-769
+        """
+        class TestDoc(Document):
+            txt = StringField()
+
+            meta = {
+                'allow_inheritance': True,
+                'indexes': [
+                    {'fields': ('txt',), 'cls': False}
+                ]
+            }
+
+        class TestChildDoc(TestDoc):
+            txt2 = StringField()
+
+            meta = {
+                'indexes': [
+                    {'fields': ('txt2',), 'cls': False}
+                ]
+            }
+
+        TestDoc.drop_collection()
+        TestDoc.ensure_indexes()
+        TestChildDoc.ensure_indexes()
+
+        index_info = TestDoc._get_collection().index_information()
+        for key in index_info:
+            del index_info[key]['v']  # drop the index version - we don't care about that here
+            if 'ns' in index_info[key]:
+                del index_info[key]['ns']  # drop the index namespace - we don't care about that here, MongoDB 3+
+            if 'dropDups' in index_info[key]:
+                del index_info[key]['dropDups']  # drop the index dropDups - it is deprecated in MongoDB 3+
+
+        self.assertEqual(index_info, {
+            'txt_1': {
+                'key': [('txt', 1)],
+                'background': False
+            },
+            '_id_': {
+                'key': [('_id', 1)],
+            },
+            'txt2_1': {
+                'key': [('txt2', 1)],
+                'background': False
+            },
+            '_cls_1': {
+                'key': [('_cls', 1)],
+                'background': False,
+            }
+        })
+
+    def test_compound_index_underscore_cls_not_overwritten(self):
+        """
+        Test that the compound index doesn't get another _cls when it is specified
+        """
+        class TestDoc(Document):
+            shard_1 = StringField()
+            txt_1 = StringField()
+
+            meta = {
+                'collection': 'test',
+                'allow_inheritance': True,
+                'sparse': True,
+                'shard_key': 'shard_1',
+                'indexes': [
+                    ('shard_1', '_cls', 'txt_1'),
+                ]
+            }
+
+        TestDoc.drop_collection()
+        TestDoc.ensure_indexes()
+
+        index_info = TestDoc._get_collection().index_information()
+        self.assertTrue('shard_1_1__cls_1_txt_1_1' in index_info)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -1,12 +1,16 @@
-import pymongo
-from pymongo import MongoClient, MongoReplicaSetClient, uri_parser
-
+from pymongo import MongoClient, ReadPreference, uri_parser
+from mongoengine.python_support import IS_PYMONGO_3
 
 __all__ = ['ConnectionError', 'connect', 'register_connection',
            'DEFAULT_CONNECTION_NAME']
 
 
 DEFAULT_CONNECTION_NAME = 'default'
+if IS_PYMONGO_3:
+    READ_PREFERENCE = ReadPreference.PRIMARY
+else:
+    from pymongo import MongoReplicaSetClient
+    READ_PREFERENCE = False
 
 
 class ConnectionError(Exception):
@@ -18,9 +22,10 @@ _connections = {}
 _dbs = {}
 
 
-def register_connection(alias, name, host=None, port=None,
-                        is_slave=False, read_preference=False, slaves=None,
-                        username=None, password=None, **kwargs):
+def register_connection(alias, name=None, host=None, port=None,
+                        read_preference=READ_PREFERENCE,
+                        username=None, password=None, authentication_source=None,
+                        **kwargs):
     """Add a connection.
 
     :param alias: the name that will be used to refer to this connection
@@ -28,41 +33,52 @@ def register_connection(alias, name, host=None, port=None,
     :param name: the name of the specific database to use
     :param host: the host name of the :program:`mongod` instance to connect to
     :param port: the port that the :program:`mongod` instance is running on
-    :param is_slave: whether the connection can act as a slave
-      ** Depreciated pymongo 2.0.1+
     :param read_preference: The read preference for the collection
        ** Added pymongo 2.1
-    :param slaves: a list of aliases of slave connections; each of these must
-        be a registered connection that has :attr:`is_slave` set to ``True``
     :param username: username to authenticate with
     :param password: password to authenticate with
+    :param authentication_source: database to authenticate against
+    :param is_mock: explicitly use mongomock for this connection
+        (can also be done by using `mongomock://` as db host prefix)
     :param kwargs: allow ad-hoc parameters to be passed into the pymongo driver
 
+    .. versionchanged:: 0.10.6 - added mongomock support
     """
     global _connection_settings
 
     conn_settings = {
-        'name': name,
+        'name': name or 'test',
         'host': host or 'localhost',
         'port': port or 27017,
-        'is_slave': is_slave,
-        'slaves': slaves or [],
+        'read_preference': read_preference,
         'username': username,
         'password': password,
-        'read_preference': read_preference
+        'authentication_source': authentication_source
     }
 
     # Handle uri style connections
-    if "://" in conn_settings['host']:
-        uri_dict = uri_parser.parse_uri(conn_settings['host'])
+    conn_host = conn_settings['host']
+    if conn_host.startswith('mongomock://'):
+        conn_settings['is_mock'] = True
+        # `mongomock://` is not a valid url prefix and must be replaced by `mongodb://`
+        conn_settings['host'] = conn_host.replace('mongomock://', 'mongodb://', 1)
+    elif '://' in conn_host:
+        uri_dict = uri_parser.parse_uri(conn_host)
         conn_settings.update({
             'name': uri_dict.get('database') or name,
             'username': uri_dict.get('username'),
             'password': uri_dict.get('password'),
             'read_preference': read_preference,
         })
-        if "replicaSet" in conn_settings['host']:
+        uri_options = uri_dict['options']
+        if 'replicaset' in uri_options:
             conn_settings['replicaSet'] = True
+        if 'authsource' in uri_options:
+            conn_settings['authentication_source'] = uri_options['authsource']
+
+    # Deprecated parameters that should not be passed on
+    kwargs.pop('slaves', None)
+    kwargs.pop('is_slave', None)
 
     conn_settings.update(kwargs)
     _connection_settings[alias] = conn_settings
@@ -73,7 +89,7 @@ def disconnect(alias=DEFAULT_CONNECTION_NAME):
     global _dbs
 
     if alias in _connections:
-        get_connection(alias=alias).disconnect()
+        get_connection(alias=alias).close()
         del _connections[alias]
     if alias in _dbs:
         del _dbs[alias]
@@ -93,33 +109,49 @@ def get_connection(alias=DEFAULT_CONNECTION_NAME, reconnect=False):
             raise ConnectionError(msg)
         conn_settings = _connection_settings[alias].copy()
 
-        if hasattr(pymongo, 'version_tuple'):  # Support for 2.1+
-            conn_settings.pop('name', None)
-            conn_settings.pop('slaves', None)
-            conn_settings.pop('is_slave', None)
-            conn_settings.pop('username', None)
-            conn_settings.pop('password', None)
-        else:
-            # Get all the slave connections
-            if 'slaves' in conn_settings:
-                slaves = []
-                for slave_alias in conn_settings['slaves']:
-                    slaves.append(get_connection(slave_alias))
-                conn_settings['slaves'] = slaves
-                conn_settings.pop('read_preference', None)
+        conn_settings.pop('name', None)
+        conn_settings.pop('username', None)
+        conn_settings.pop('password', None)
+        conn_settings.pop('authentication_source', None)
 
-        connection_class = MongoClient
+        is_mock = conn_settings.pop('is_mock', None)
+        if is_mock:
+            # Use MongoClient from mongomock
+            try:
+                import mongomock
+            except ImportError:
+                raise RuntimeError('You need mongomock installed '
+                                   'to mock MongoEngine.')
+            connection_class = mongomock.MongoClient
+        else:
+            # Use MongoClient from pymongo
+            connection_class = MongoClient
+
         if 'replicaSet' in conn_settings:
-            conn_settings['hosts_or_uri'] = conn_settings.pop('host', None)
             # Discard port since it can't be used on MongoReplicaSetClient
             conn_settings.pop('port', None)
             # Discard replicaSet if not base string
             if not isinstance(conn_settings['replicaSet'], basestring):
                 conn_settings.pop('replicaSet', None)
-            connection_class = MongoReplicaSetClient
+            if not IS_PYMONGO_3:
+                connection_class = MongoReplicaSetClient
+                conn_settings['hosts_or_uri'] = conn_settings.pop('host', None)
 
         try:
-            _connections[alias] = connection_class(**conn_settings)
+            connection = None
+            # check for shared connections
+            connection_settings_iterator = (
+                (db_alias, settings.copy()) for db_alias, settings in _connection_settings.iteritems())
+            for db_alias, connection_settings in connection_settings_iterator:
+                connection_settings.pop('name', None)
+                connection_settings.pop('username', None)
+                connection_settings.pop('password', None)
+                connection_settings.pop('authentication_source', None)
+                if conn_settings == connection_settings and _connections.get(db_alias, None):
+                    connection = _connections[db_alias]
+                    break
+
+            _connections[alias] = connection if connection else connection_class(**conn_settings)
         except Exception, e:
             raise ConnectionError("Cannot connect to database %s :\n%s" % (alias, e))
     return _connections[alias]
@@ -137,12 +169,13 @@ def get_db(alias=DEFAULT_CONNECTION_NAME, reconnect=False):
         # Authenticate if necessary
         if conn_settings['username'] and conn_settings['password']:
             db.authenticate(conn_settings['username'],
-                            conn_settings['password'])
+                            conn_settings['password'],
+                            source=conn_settings['authentication_source'])
         _dbs[alias] = db
     return _dbs[alias]
 
 
-def connect(db, alias=DEFAULT_CONNECTION_NAME, **kwargs):
+def connect(db=None, alias=DEFAULT_CONNECTION_NAME, **kwargs):
     """Connect to the database specified by the 'db' argument.
 
     Connection settings may be provided here as well if the database is not
